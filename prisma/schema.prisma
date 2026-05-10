@@ -1,73 +1,200 @@
 // prisma/schema.prisma
-// Define your database models
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-// Example models
+// ─────────────────────────────────────────
+// ENUMS (replace free-text strings)
+// ─────────────────────────────────────────
+
+enum Role {
+  owner
+  admin
+  member
+  viewer
+}
+
+enum AiStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum InviteStatus {
+  pending
+  accepted
+  expired
+  revoked
+}
+
+// ─────────────────────────────────────────
+// CORE TABLES
+// ─────────────────────────────────────────
 
 model User {
-  id          String               @id @default(cuid())
-  clerkUserId String               @unique
+  id          String    @id @default(cuid())
+  clerkUserId String    @unique
   name        String?
-  email       String               @unique
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime    @updatedAt
+  email       String    @unique
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
-  memberships OrganizationMember[]
-  documents   Document[]
 
+  memberships OrganizationMember[]
+  invitesSent OrganizationInvite[] @relation("InviteSender")
+  documents   Document[]
+  versions    DocumentVersion[]
+
+  @@index([deletedAt])
   @@map("users")
 }
 
-model Document {
-  id                   String              @id @default(cuid())
-  name                 String
-  content              String?
-  fileUrl              String?
-  fileType             String?
-  fileSize             Int?
-  aiSummary            String?
-  aiKeywords           String[]
-  sentiment            String?
-  userId               String
-  organizationId       String
-  organization         Organization        @relation(fields: [organizationId], references: [id])
-  user                 User                @relation(fields: [userId], references: [id])
-  organizationMember   OrganizationMember? @relation(fields: [organizationMemberId], references: [id])
-  organizationMemberId String?
-  createdAt            DateTime            @default(now())
-
-  @@map("documents")
-}
-
 model Organization {
-  id         String               @id @default(cuid())
-  clerkOrgId String               @unique
+  id         String    @id @default(cuid())
+  clerkOrgId String    @unique
   name       String?
-  slug       String               @unique
-  createdAt  DateTime             @default(now())
-  members    OrganizationMember[]
-  documents  Document[]
+  slug       String    @unique
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
 
+  members   OrganizationMember[]
+  invites   OrganizationInvite[]
+  documents Document[]
+
+  @@index([slug])
+  @@index([deletedAt])
   @@map("organizations")
 }
 
+// ─────────────────────────────────────────
+// JUNCTION + INVITE TABLES
+// ─────────────────────────────────────────
+
 model OrganizationMember {
-  id             String       @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   userId         String
-  role           String       @default("member")
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  user           User         @relation(fields: [userId], references: [id])
-  documents      Document[]
+  role           Role      @default(member)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
 
   @@unique([organizationId, userId])
-  @@map("organizations_members")
+  @@index([organizationId])
+  @@index([userId])
+  @@index([deletedAt])
+  @@map("organization_members")
+}
+
+model OrganizationInvite {
+  id             String       @id @default(cuid())
+  organizationId String
+  email          String
+  token          String       @unique
+  role           Role         @default(member)
+  invitedById    String
+  status         InviteStatus @default(pending)
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  invitedBy    User         @relation("InviteSender", fields: [invitedById], references: [id])
+
+  @@index([token])
+  @@index([organizationId])
+  @@index([status])
+  @@index([invitedById])
+  @@map("organization_invites")
+}
+
+// ─────────────────────────────────────────
+// DOCUMENT + FILE + VERSION TABLES
+// ─────────────────────────────────────────
+
+model Document {
+  id             String    @id @default(cuid())
+  name           String
+  content        String?
+  userId         String
+  organizationId String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  // File data grouped in separate table (cleaner, optional uploads)
+  file File?
+
+  aiAnalysis DocumentAI?
+
+  // Relations
+  user         User         @relation(fields: [userId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  // Version history
+  versions DocumentVersion[]
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([deletedAt])
+  @@map("documents")
+}
+
+model DocumentAI {
+  id         String   @id @default(cuid())
+  documentId String   @unique
+  summary    String?
+  keywords   String[]
+  sentiment  String?
+  status     AiStatus @default(pending)
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("document_ai")
+}
+
+// Separate table for file metadata (always consistent or absent)
+model File {
+  id         String   @id @default(cuid())
+  documentId String   @unique
+  url        String
+  type       String
+  size       Int
+  name       String // Original filename
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("files")
+}
+
+// Document versioning (full history)
+model DocumentVersion {
+  id         String   @id @default(cuid())
+  documentId String
+  content    String?
+  editedById String
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  editedBy User     @relation(fields: [editedById], references: [id])
+
+  @@index([documentId])
+  @@map("document_versions")
 }
