@@ -1,0 +1,73 @@
+// prisma/schema.prisma
+// Define your database models
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Example models
+
+model User {
+  id          String               @id @default(cuid())
+  clerkUserId String               @unique
+  name        String?
+  email       String               @unique
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+  memberships OrganizationMember[]
+  documents   Document[]
+
+  @@map("users")
+}
+
+model Document {
+  id                   String              @id @default(cuid())
+  name                 String
+  content              String?
+  fileUrl              String?
+  fileType             String?
+  fileSize             Int?
+  aiSummary            String?
+  aiKeywords           String[]
+  sentiment            String?
+  userId               String
+  organizationId       String
+  organization         Organization        @relation(fields: [organizationId], references: [id])
+  user                 User                @relation(fields: [userId], references: [id])
+  organizationMember   OrganizationMember? @relation(fields: [organizationMemberId], references: [id])
+  organizationMemberId String?
+  createdAt            DateTime            @default(now())
+
+  @@map("documents")
+}
+
+model Organization {
+  id         String               @id @default(cuid())
+  clerkOrgId String               @unique
+  name       String?
+  slug       String               @unique
+  createdAt  DateTime             @default(now())
+  members    OrganizationMember[]
+  documents  Document[]
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  role           String       @default("member")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
+  documents      Document[]
+
+  @@unique([organizationId, userId])
+  @@map("organizations_members")
+}
