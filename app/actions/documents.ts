@@ -93,3 +93,39 @@ export async function uploadDocument(
     return { error: "An unexpected error occurred during upload." };
   }
 }
+
+export async function deleteDocument(documentId: string) {
+  try {
+    const { org, role } = await getAuthContext();
+
+    // Verify role (owner/admin only)
+    if (role !== "owner" && role !== "admin") {
+      throw new Error("Only organization owners or admins can delete documents.");
+    }
+
+    const document = await prisma.document.findUnique({
+      where: {
+        id: documentId,
+        organizationId: org.id,
+        deletedAt: null,
+      },
+    });
+
+    if (!document) {
+      throw new Error("Document not found or already deleted.");
+    }
+
+    await prisma.document.update({
+      where: { id: documentId },
+      data: { deletedAt: new Date() },
+    });
+
+    revalidatePath("/documents");
+    revalidatePath(`/documents/${documentId}`);
+    
+    return { success: true };
+  } catch (error) {
+    console.error("Delete document error:", error);
+    return { error: error instanceof Error ? error.message : "An unexpected error occurred" };
+  }
+}
